@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -6,9 +7,7 @@
 <title>JARVIS AI</title>
 
 <style>
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
@@ -70,9 +69,7 @@ header {
   white-space: pre-wrap;
 }
 
-.user {
-  background: #103b60;
-}
+.user { background: #103b60; }
 
 .jarvis {
   background: #102438;
@@ -108,16 +105,13 @@ button {
   cursor: pointer;
 }
 
-button:active {
-  background: #176da8;
-}
+button:active { background: #176da8; }
 
 .bottom {
   display: flex;
   gap: 10px;
   margin-bottom: 25px;
 }
-
 </style>
 </head>
 
@@ -141,7 +135,7 @@ button:active {
 </div>
 
 <div class="bottom">
-  <button onclick="startVoice()">تحدث</button>
+  <button id="voiceButton" onclick="toggleVoice()">تحدث</button>
   <button onclick="enableAudio()">تفعيل الصوت</button>
 </div>
 
@@ -151,10 +145,14 @@ const API = "https://jarvis-s-ten.vercel.app";
 let history = [];
 let audioEnabled = false;
 let recognition = null;
+let voiceMode = false;
+let processing = false;
+let speaking = false;
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("message");
 const statusText = document.getElementById("status");
+const voiceButton = document.getElementById("voiceButton");
 
 function addMessage(text, type) {
   const div = document.createElement("div");
@@ -168,99 +166,39 @@ function setStatus(text) {
   statusText.textContent = text;
 }
 
-async function sendMessage() {
-  const message = input.value.trim();
-
-  if (!message) return;
-
-  input.value = "";
-  addMessage(message, "user");
-  setStatus("جارٍ التفكير...");
+function startListening() {
+  if (!voiceMode || processing || speaking || !recognition) return;
 
   try {
-    const response = await fetch(API + "/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        message: message,
-        history: history
-      })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || "Chat API: " + response.status);
-    }
-
-    const answer = data.answer;
-
-    addMessage(answer, "jarvis");
-
-    history.push(
-      { role: "user", content: message },
-      { role: "assistant", content: answer }
-    );
-
-    history = history.slice(-12);
-
-    setStatus("النظام جاهز");
-
-    if (audioEnabled) {
-      await getAudio(answer);
-    }
-
+    recognition.start();
   } catch (error) {
-    addMessage("حدث خطأ: " + error.message, "jarvis");
-    setStatus("حدث خطأ");
+    setTimeout(() => {
+      if (voiceMode && !processing && !speaking) {
+        try {
+          recognition.start();
+        } catch (e) {}
+      }
+    }, 500);
   }
 }
 
-async function getAudio(text) {
-  try {
-    setStatus("جارٍ تجهيز الصوت...");
-
-    const response = await fetch(API + "/api/tts", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ text: text })
-    });
-
-    if (!response.ok) {
-      throw new Error("TTS API: " + response.status);
-    }
-
-    const blob = await response.blob();
-    const audioUrl = URL.createObjectURL(blob);
-    const audio = new Audio(audioUrl);
-
-    audio.onended = () => {
-      URL.revokeObjectURL(audioUrl);
-      setStatus("النظام جاهز");
-    };
-
-    audio.onerror = () => {
-      URL.revokeObjectURL(audioUrl);
-      setStatus("تعذر تشغيل الصوت");
-    };
-
-    await audio.play();
-
-  } catch (error) {
-    setStatus("خطأ الصوت: " + error.message);
+function stopListening() {
+  if (recognition) {
+    try {
+      recognition.stop();
+    } catch (error) {}
   }
 }
 
-async function enableAudio() {
-  audioEnabled = true;
-  setStatus("تم تفعيل الصوت");
-}
+function toggleVoice() {
+  if (voiceMode) {
+    voiceMode = false;
+    stopListening();
+    voiceButton.textContent = "تحدث";
+    setStatus("تم إيقاف الاستماع");
+    return;
+  }
 
-function startVoice() {
   const SpeechRecognition =
     window.SpeechRecognition ||
     window.webkitSpeechRecognition;
@@ -276,30 +214,152 @@ function startVoice() {
   recognition.interimResults = false;
 
   recognition.onstart = () => {
-    setStatus("استمع إليك...");
+    if (voiceMode && !processing && !speaking) {
+      setStatus("استمع إليك");
+    }
   };
 
   recognition.onresult = (event) => {
     const transcript = event.results[0][0].transcript;
+
+    if (!transcript.trim()) return;
+
     input.value = transcript;
+    stopListening();
     sendMessage();
   };
 
   recognition.onerror = (event) => {
-    setStatus("خطأ المايكروفون: " + event.error);
-  };
+    if (event.error === "not-allowed") {
+      voiceMode = false;
+      voiceButton.textContent = "تحدث";
+      setStatus("اسمح للمتصفح باستخدام المايكروفون");
+      return;
+    }
 
-  recognition.onend = () => {
-    if (statusText.textContent === "استمع إليك...") {
-      setStatus("النظام جاهز");
+    if (voiceMode && !processing && !speaking) {
+      setStatus("خطأ المايكروفون");
     }
   };
 
+  recognition.onend = () => {
+    if (voiceMode && !processing && !speaking) {
+      setTimeout(startListening, 400);
+    }
+  };
+
+  voiceMode = true;
+  voiceButton.textContent = "إيقاف الاستماع";
+  startListening();
+}
+
+async function sendMessage() {
+  const message = input.value.trim();
+
+  if (!message || processing) return;
+
+  processing = true;
+  input.value = "";
+
+  stopListening();
+
+  addMessage(message, "user");
+  setStatus("جار التفكير");
+
   try {
-    recognition.start();
+    const response = await fetch(API + "/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        message,
+        history
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "خطأ في الاتصال");
+    }
+
+    const answer = data.answer;
+
+    addMessage(answer, "jarvis");
+
+    history.push(
+      { role: "user", content: message },
+      { role: "assistant", content: answer }
+    );
+
+    history = history.slice(-12);
+
+    if (audioEnabled) {
+      await getAudio(answer);
+    }
+
+    processing = false;
+
+    if (voiceMode) {
+      setStatus("استمع إليك");
+      setTimeout(startListening, 500);
+    } else {
+      setStatus("النظام جاهز");
+    }
+
   } catch (error) {
-    setStatus("تعذر تشغيل المايكروفون");
+    processing = false;
+    addMessage("حدث خطأ " + error.message, "jarvis");
+
+    if (voiceMode) {
+      setTimeout(startListening, 500);
+    } else {
+      setStatus("حدث خطأ");
+    }
   }
+}
+
+async function getAudio(text) {
+  try {
+    speaking = true;
+    setStatus("جارفيس يتحدث");
+
+    const response = await fetch(API + "/api/tts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ text })
+    });
+
+    if (!response.ok) {
+      throw new Error("خطأ في الصوت");
+    }
+
+    const blob = await response.blob();
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(audioUrl);
+
+    await new Promise((resolve) => {
+      audio.onended = resolve;
+      audio.onerror = resolve;
+
+      audio.play().catch(resolve);
+    });
+
+    URL.revokeObjectURL(audioUrl);
+
+  } catch (error) {
+    setStatus("تعذر تشغيل الصوت");
+  } finally {
+    speaking = false;
+  }
+}
+
+async function enableAudio() {
+  audioEnabled = true;
+  setStatus("تم تفعيل الصوت");
 }
 
 input.addEventListener("keydown", function(event) {
