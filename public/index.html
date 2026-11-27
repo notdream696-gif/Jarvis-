@@ -5,10 +5,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JARVIS AI</title>
-
 <style>
 * { box-sizing: border-box; }
-
 body {
   margin: 0;
   min-height: 100vh;
@@ -19,7 +17,6 @@ body {
   flex-direction: column;
   align-items: center;
 }
-
 header {
   width: 100%;
   padding: 20px;
@@ -29,7 +26,6 @@ header {
   font-weight: bold;
   letter-spacing: 4px;
 }
-
 .core {
   width: 150px;
   height: 150px;
@@ -43,13 +39,11 @@ header {
   color: #55caff;
   font-size: 35px;
 }
-
 #status {
   color: #55bfff;
   margin: 10px;
   font-size: 14px;
 }
-
 #chat {
   width: 92%;
   max-width: 600px;
@@ -60,7 +54,6 @@ header {
   padding: 12px;
   background: #081426;
 }
-
 .message {
   padding: 12px;
   margin: 8px 0;
@@ -68,14 +61,11 @@ header {
   line-height: 1.7;
   white-space: pre-wrap;
 }
-
 .user { background: #103b60; }
-
 .jarvis {
   background: #102438;
   border: 1px solid #17618e;
 }
-
 .controls {
   width: 92%;
   max-width: 600px;
@@ -83,7 +73,6 @@ header {
   gap: 8px;
   margin: 15px 0;
 }
-
 input {
   flex: 1;
   min-width: 0;
@@ -94,7 +83,6 @@ input {
   color: white;
   font-size: 16px;
 }
-
 button {
   padding: 12px 16px;
   border: 1px solid #168bd5;
@@ -104,9 +92,6 @@ button {
   font-size: 15px;
   cursor: pointer;
 }
-
-button:active { background: #176da8; }
-
 .bottom {
   display: flex;
   gap: 10px;
@@ -114,19 +99,14 @@ button:active { background: #176da8; }
 }
 </style>
 </head>
-
 <body>
 
 <header>J.A.R.V.I.S</header>
-
 <div class="core">J</div>
-
 <div id="status">النظام جاهز</div>
 
 <div id="chat">
-  <div class="message jarvis">
-    مرحباً، أنا JARVIS. كيف يمكنني مساعدتك؟
-  </div>
+  <div class="message jarvis">مرحباً، أنا JARVIS. كيف يمكنني مساعدتك؟</div>
 </div>
 
 <div class="controls">
@@ -148,6 +128,9 @@ let recognition = null;
 let voiceMode = false;
 let processing = false;
 let speaking = false;
+let currentAudio = null;
+let interruptedText = "";
+let recognitionStarting = false;
 
 const chat = document.getElementById("chat");
 const input = document.getElementById("message");
@@ -167,26 +150,22 @@ function setStatus(text) {
 }
 
 function startListening() {
-  if (!voiceMode || processing || speaking || !recognition) return;
+  if (!voiceMode || !recognition || recognitionStarting) return;
+  if (processing && !speaking) return;
+
+  recognitionStarting = true;
 
   try {
     recognition.start();
   } catch (error) {
-    setTimeout(() => {
-      if (voiceMode && !processing && !speaking) {
-        try {
-          recognition.start();
-        } catch (e) {}
-      }
-    }, 500);
+    recognitionStarting = false;
   }
 }
 
 function stopListening() {
+  recognitionStarting = false;
   if (recognition) {
-    try {
-      recognition.stop();
-    } catch (error) {}
+    try { recognition.stop(); } catch (error) {}
   }
 }
 
@@ -194,6 +173,9 @@ function toggleVoice() {
   if (voiceMode) {
     voiceMode = false;
     stopListening();
+
+    if (currentAudio) currentAudio.pause();
+
     voiceButton.textContent = "تحدث";
     setStatus("تم إيقاف الاستماع");
     return;
@@ -214,36 +196,36 @@ function toggleVoice() {
   recognition.interimResults = false;
 
   recognition.onstart = () => {
-    if (voiceMode && !processing && !speaking) {
-      setStatus("استمع إليك");
+    recognitionStarting = false;
+    if (voiceMode) {
+      setStatus(speaking ? "جارفيس يتحدث ويمكنك مقاطعته" : "استمع إليك");
     }
   };
 
   recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
+    const transcript = event.results[0][0].transcript.trim();
+    if (!transcript) return;
 
-    if (!transcript.trim()) return;
-
-    input.value = transcript;
     stopListening();
-    sendMessage();
-  };
 
-  recognition.onerror = (event) => {
-    if (event.error === "not-allowed") {
-      voiceMode = false;
-      voiceButton.textContent = "تحدث";
-      setStatus("اسمح للمتصفح باستخدام المايكروفون");
+    if (speaking && currentAudio) {
+      interruptedText = transcript;
+      currentAudio.pause();
       return;
     }
 
-    if (voiceMode && !processing && !speaking) {
-      setStatus("خطأ المايكروفون");
-    }
+    input.value = transcript;
+    sendMessage();
+  };
+
+  recognition.onerror = () => {
+    recognitionStarting = false;
   };
 
   recognition.onend = () => {
-    if (voiceMode && !processing && !speaking) {
+    recognitionStarting = false;
+
+    if (voiceMode && (!processing || speaking)) {
       setTimeout(startListening, 400);
     }
   };
@@ -255,12 +237,10 @@ function toggleVoice() {
 
 async function sendMessage() {
   const message = input.value.trim();
-
   if (!message || processing) return;
 
   processing = true;
   input.value = "";
-
   stopListening();
 
   addMessage(message, "user");
@@ -269,13 +249,8 @@ async function sendMessage() {
   try {
     const response = await fetch(API + "/api/chat", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        message,
-        history
-      })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, history })
     });
 
     const data = await response.json();
@@ -285,7 +260,6 @@ async function sendMessage() {
     }
 
     const answer = data.answer;
-
     addMessage(answer, "jarvis");
 
     history.push(
@@ -301,9 +275,17 @@ async function sendMessage() {
 
     processing = false;
 
+    if (interruptedText) {
+      const nextMessage = interruptedText;
+      interruptedText = "";
+      input.value = nextMessage;
+      sendMessage();
+      return;
+    }
+
     if (voiceMode) {
       setStatus("استمع إليك");
-      setTimeout(startListening, 500);
+      setTimeout(startListening, 400);
     } else {
       setStatus("النظام جاهز");
     }
@@ -322,29 +304,32 @@ async function sendMessage() {
 
 async function getAudio(text) {
   try {
-    speaking = true;
-    setStatus("جارفيس يتحدث");
+    setStatus("جار تجهيز الصوت");
 
     const response = await fetch(API + "/api/tts", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text })
     });
 
-    if (!response.ok) {
-      throw new Error("خطأ في الصوت");
-    }
+    if (!response.ok) throw new Error("خطأ في الصوت");
 
     const blob = await response.blob();
     const audioUrl = URL.createObjectURL(blob);
     const audio = new Audio(audioUrl);
 
-    await new Promise((resolve) => {
+    currentAudio = audio;
+    speaking = true;
+
+    if (voiceMode) {
+      setStatus("جارفيس يتحدث ويمكنك مقاطعته");
+      setTimeout(startListening, 200);
+    }
+
+    await new Promise(resolve => {
       audio.onended = resolve;
       audio.onerror = resolve;
-
+      audio.onpause = resolve;
       audio.play().catch(resolve);
     });
 
@@ -354,20 +339,18 @@ async function getAudio(text) {
     setStatus("تعذر تشغيل الصوت");
   } finally {
     speaking = false;
+    currentAudio = null;
   }
 }
 
-async function enableAudio() {
+function enableAudio() {
   audioEnabled = true;
   setStatus("تم تفعيل الصوت");
 }
 
-input.addEventListener("keydown", function(event) {
-  if (event.key === "Enter") {
-    sendMessage();
-  }
+input.addEventListener("keydown", event => {
+  if (event.key === "Enter") sendMessage();
 });
 </script>
-
 </body>
 </html>
