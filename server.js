@@ -1,17 +1,16 @@
 
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
+// عرض واجهة JARVIS
 app.get("/", (req, res) => {
-  res.json({
-    name: "JARVIS Backend",
-    status: "running"
-  });
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.get("/health", (req, res) => {
@@ -32,24 +31,21 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
+    if (!message) {
+      return res.status(400).json({
+        error: "Message is required"
+      });
+    }
+
     const messages = [
       {
         role: "system",
         content: `
 أنت JARVIS، مساعد ذكاء اصطناعي متقدم.
-
-قواعد الحديث:
-- افهم المستخدم مهما كانت لهجته، بما فيها اللهجة العراقية.
-- أجب دائماً باللغة العربية الفصحى الحديثة.
-- لا تستخدم اللهجة العراقية في إجاباتك.
-- استخدم جملاً عربية طبيعية وواضحة وسهلة النطق.
-- تجنب الكلمات العامية والاختصارات.
-- اكتب الأرقام والكلمات بطريقة مناسبة للنطق الصوتي.
-- لا تستخدم التشكيل إلا عند الحاجة لتوضيح النطق.
-- اجعل إجاباتك مختصرة ومباشرة.
-- لا تستخدم الإيموجي أو الزخارف.
-- لا تكرر السؤال في الإجابة.
-- لا تدّعِ أنك نفذت شيئاً لم تنفذه.
+افهم اللهجة العراقية وأجب دائماً باللغة العربية الفصحى الحديثة.
+اجعل إجاباتك مختصرة ومباشرة وطبيعية.
+لا تستخدم الإيموجي أو الزخارف.
+لا تدّعِ تنفيذ شيء لم تنفذه.
         `
       },
       ...history.slice(-12),
