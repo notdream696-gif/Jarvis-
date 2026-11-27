@@ -8,7 +8,6 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-// عرض واجهة JARVIS
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
@@ -19,6 +18,15 @@ app.get("/health", (req, res) => {
     service: "jarvis-backend"
   });
 });
+
+// تنظيف الإجابات من الرموز والتنسيقات
+function cleanAnswer(text) {
+  return text
+    .replace(/[*_~`#>|[\]{}()]/g, "")
+    .replace(/[•●▪◆★✓✔️⚡🔥]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 // JARVIS AI
 app.post("/api/chat", async (req, res) => {
@@ -42,10 +50,19 @@ app.post("/api/chat", async (req, res) => {
         role: "system",
         content: `
 أنت JARVIS، مساعد ذكاء اصطناعي متقدم.
-افهم اللهجة العراقية وأجب دائماً باللغة العربية الفصحى الحديثة.
-اجعل إجاباتك مختصرة ومباشرة وطبيعية.
-لا تستخدم الإيموجي أو الزخارف.
-لا تدّعِ تنفيذ شيء لم تنفذه.
+
+قواعد الإجابة:
+- افهم المستخدم مهما كانت لهجته، بما فيها اللهجة العراقية.
+- أجب دائماً باللغة العربية الفصحى الحديثة.
+- اجعل الإجابة قصيرة وبسيطة ومباشرة.
+- أعطِ المعلومة المطلوبة فقط دون مقدمات أو حشو.
+- لا تقدم تفاصيل إضافية إلا إذا طلب المستخدم ذلك صراحة.
+- إذا كان السؤال يحتاج تاريخاً، اذكر التاريخ بوضوح.
+- إذا طلب المستخدم شرحاً أو تفاصيل، قدمها بشكل منظم ومفهوم.
+- لا تستخدم الرموز التعبيرية أو الزخارف أو التنسيقات أو علامات التعداد.
+- لا تستخدم النجوم أو الأقواس أو علامات Markdown.
+- لا تكرر السؤال في الإجابة.
+- لا تدّعِ أنك نفذت شيئاً لم تنفذه.
         `
       },
       ...history.slice(-12),
@@ -66,7 +83,7 @@ app.post("/api/chat", async (req, res) => {
         body: JSON.stringify({
           model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
           messages,
-          temperature: 0.5
+          temperature: 0.4
         })
       }
     );
@@ -77,9 +94,11 @@ app.post("/api/chat", async (req, res) => {
       return res.status(response.status).json(data);
     }
 
-    res.json({
-      answer: data.choices[0].message.content
-    });
+    const answer = cleanAnswer(
+      data.choices[0].message.content
+    );
+
+    res.json({ answer });
 
   } catch (error) {
     res.status(500).json({
