@@ -1,0 +1,265 @@
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#050b18;color:#eaf5ff;
+ font-family:Arial,sans-serif;min-height:100vh;
+ display:flex;justify-content:center;align-items:center;
+}
+.app{width:100%;max-width:500px;padding:22px}
+h1{text-align:center;color:#36aaff;letter-spacing:5px}
+.core{
+ width:125px;height:125px;border-radius:50%;
+ margin:25px auto;
+ background:radial-gradient(circle,#b9f4ff,#168bd8 35%,#061b38 70%);
+ box-shadow:0 0 35px #168bd8;
+}
+#status{text-align:center;color:#76bce9;margin:15px}
+#chat{
+ height:330px;overflow-y:auto;background:#0b1729;
+ border:1px solid #173b5d;border-radius:15px;padding:12px;
+}
+.msg{padding:12px;margin:8px 0;border-radius:12px;line-height:1.8;white-space:pre-wrap}
+.user{background:#12385b}
+.jarvis{background:#102438}
+.controls{display:flex;gap:8px;margin-top:12px}
+input{
+ flex:1;min-width:0;padding:14px;border-radius:12px;
+ border:1px solid #24618b;background:#0b1729;color:white;
+}
+button{
+ padding:12px 16px;border:0;border-radius:12px;
+ background:#087fc4;color:white;font-size:15px;
+}
+#mic,#enableAudio{margin-top:10px;width:100%;background:#16466a}
+#enableAudio{background:#087fc4}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>J.A.R.V.I.S</h1>
+<div class="core"></div>
+<div id="status">JARVIS ONLINE</div>
+
+<button id="enableAudio" onclick="enableAudio()">تفعيل صوت جارفيس</button>
+
+<div id="chat"></div>
+
+<div class="controls">
+<input id="message" placeholder="اكتب لجارفيس...">
+<button onclick="sendMessage()">إرسال</button>
+</div>
+
+<button id="mic" onclick="startVoice()">تحدث مع جارفيس</button>
+</div>
+
+<script>
+const API="https://jarvis-s-ten.vercel.app";
+
+const chat=document.getElementById("chat");
+const input=document.getElementById("message");
+const statusText=document.getElementById("status");
+
+let history=[];
+let busy=false;
+let audioEnabled=false;
+let audioContext=null;
+
+function addMessage(text,type){
+ const div=document.createElement("div");
+ div.className="msg "+type;
+ div.textContent=text;
+ chat.appendChild(div);
+ chat.scrollTop=chat.scrollHeight;
+ return div;
+}
+
+async function enableAudio(){
+ try{
+   const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+   if(!AudioContextClass)throw new Error("المتصفح لا يدعم الصوت");
+
+   if(!audioContext)audioContext=new AudioContextClass();
+
+   await audioContext.resume();
+   audioEnabled=audioContext.state==="running";
+
+   document.getElementById("enableAudio").textContent=
+     audioEnabled?"الصوت مفعّل":"إعادة تفعيل الصوت";
+
+   statusText.textContent=audioEnabled?"VOICE ENABLED":"VOICE ERROR";
+ }catch(error){
+   statusText.textContent=error.message;
+   alert(error.message);
+ }
+}
+
+function splitText(text){
+ const parts=text.match(/[^.!?؟؛،\n]+[.!?؟؛\n]*/g)||[text];
+ const result=[];
+ let current="";
+
+ for(const part of parts){
+   current+=part;
+   if(current.length>=100||/[.!?؟؛\n]$/.test(part)){
+     if(current.trim())result.push(current.trim());
+     current="";
+   }
+ }
+ if(current.trim())result.push(current.trim());
+ return result;
+}
+
+async function getAudio(text){
+ const response=await fetch(API+"/api/tts",{
+   method:"POST",
+   headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({text})
+ });
+
+ if(!response.ok){
+   const error=await response.text();
+   throw new Error("Fish Audio: "+response.status+" "+error);
+ }
+
+ const data=await response.arrayBuffer();
+ return await audioContext.decodeAudioData(data);
+}
+
+async function playBuffer(buffer){
+ if(audioContext.state!=="running"){
+   await audioContext.resume();
+ }
+
+ const source=audioContext.createBufferSource();
+ source.buffer=buffer;
+ source.connect(audioContext.destination);
+
+ return new Promise(resolve=>{
+   source.onended=resolve;
+   source.start(0);
+ });
+}
+
+async function typeAndSpeak(text,element){
+ const parts=splitText(text);
+ let written="";
+
+ for(const part of parts){
+   const audioPromise=audioEnabled
+     ?getAudio(part)
+     :Promise.resolve(null);
+
+   for(const char of part){
+     written+=char;
+     element.textContent=written;
+     chat.scrollTop=chat.scrollHeight;
+     await new Promise(r=>setTimeout(r,12));
+   }
+
+   if(audioEnabled){
+     const buffer=await audioPromise;
+     await playBuffer(buffer);
+   }
+ }
+}
+
+async function sendMessage(){
+ const message=input.value.trim();
+ if(!message||busy)return;
+
+ busy=true;
+ input.value="";
+ addMessage(message,"user");
+
+ const reply=addMessage("","jarvis");
+ statusText.textContent="JARVIS THINKING...";
+
+ try{
+   const response=await fetch(API+"/api/chat",{
+     method:"POST",
+     headers:{"Content-Type":"application/json"},
+     body:JSON.stringify({message,history})
+   });
+
+   if(!response.ok)throw new Error("Chat API: "+response.status);
+
+   const data=await response.json();
+   const answer=data.answer;
+   if(!answer)throw new Error("Empty response");
+
+   history.push(
+     {role:"user",content:message},
+     {role:"assistant",content:answer}
+   );
+
+   statusText.textContent=audioEnabled?"JARVIS SPEAKING...":"JARVIS ONLINE";
+   await typeAndSpeak(answer,reply);
+   statusText.textContent="JARVIS ONLINE";
+
+ }catch(error){
+   reply.textContent="صار خطأ: "+error.message;
+   statusText.textContent="CONNECTION ERROR";
+ }finally{
+   busy=false;
+ }
+}
+
+input.addEventListener("keydown",e=>{
+ if(e.key==="Enter")sendMessage();
+});
+
+function startVoice(){
+ const Speech =
+   window.SpeechRecognition ||
+   window.webkitSpeechRecognition;
+
+ if(!Speech){
+   alert("المتصفح لا يدعم التعرف على الصوت. استخدم Chrome.");
+   return;
+ }
+
+ const recognition=new Speech();
+
+ recognition.lang="ar-IQ";
+ recognition.interimResults=false;
+ recognition.continuous=false;
+ recognition.maxAlternatives=1;
+
+ recognition.onstart=()=>{
+   statusText.textContent="LISTENING...";
+ };
+
+ recognition.onresult=(event)=>{
+   const transcript=event.results[0][0].transcript;
+   input.value=transcript;
+   statusText.textContent="تم التعرف على كلامك";
+   sendMessage();
+ };
+
+ recognition.onerror=(event)=>{
+   statusText.textContent="MIC ERROR: "+event.error;
+   alert("خطأ الميكروفون: "+event.error);
+ };
+
+ recognition.onend=()=>{
+   if(!busy&&!statusText.textContent.startsWith("MIC ERROR")){
+     statusText.textContent="JARVIS ONLINE";
+   }
+ };
+
+ try{
+   recognition.start();
+ }catch(error){
+   alert("تعذر تشغيل الميكروفون: "+error.message);
+ }
+}
+</script>
+</body>
+</html>
